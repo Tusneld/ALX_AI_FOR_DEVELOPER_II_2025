@@ -55,6 +55,16 @@ export interface CreatePollForm {
   isAnonymous: boolean
 }
 
+export interface EditPollForm {
+  id: string
+  title: string
+  description?: string
+  options: string[] | PollOption[]
+  expiresAt?: Date
+  allowMultipleVotes: boolean
+  isAnonymous: boolean
+}
+
 export interface LoginForm {
   email: string
   password: string
