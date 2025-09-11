@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from '@jest/globals';
 import { votePoll, getPoll } from '@/app/actions/poll-actions';
+import { ApiResponse, Poll } from '@/types';
 
 // Mock the poll-actions module
 jest.mock('@/app/actions/poll-actions', () => ({
@@ -38,34 +39,58 @@ describe('Vote Poll Function', () => {
       totalVotes: 8,
     };
     
-    (getPoll as jest.Mock).mockResolvedValue(mockPoll);
-    (votePoll as jest.Mock).mockResolvedValue({ success: true });
+    const mockGetPollResponse: ApiResponse<Poll> = {
+      success: true,
+      data: mockPoll
+    };
+    
+    const mockVotePollResponse: ApiResponse<boolean> = {
+      success: true,
+      data: true,
+      message: 'Vote recorded successfully'
+    };
+    
+    (getPoll as jest.Mock).mockResolvedValue(mockGetPollResponse);
+    (votePoll as jest.Mock).mockResolvedValue(mockVotePollResponse);
 
     // Act
     const result = await votePoll(pollId, optionId, userId);
 
     // Assert
-    expect(getPoll).toHaveBeenCalledWith(pollId);
     expect(votePoll).toHaveBeenCalledWith(pollId, optionId, userId);
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({
+      success: true,
+      data: true,
+      message: 'Vote recorded successfully'
+    });
   });
 
-  // Unit Test 2: Invalid Poll ID - Should throw an error
-  test('should throw an error when poll ID is invalid', async () => {
+  // Unit Test 2: Invalid Poll ID - Should return error response
+  test('should return error response when poll ID is invalid', async () => {
     // Arrange
     const invalidPollId = 'invalid-id';
     const optionId = 'opt1';
     const userId = 'user789';
     
-    // Mock getPoll to throw an error for invalid poll ID
-    (getPoll as jest.Mock).mockRejectedValue(new Error('Poll not found'));
-
-    // Act & Assert
-    await expect(votePoll(invalidPollId, optionId, userId))
-      .rejects
-      .toThrow('Poll not found');
+    // Mock votePoll to return error response for invalid poll ID
+    const mockErrorResponse: ApiResponse<boolean> = {
+      success: false,
+      error: 'Poll not found',
+      message: 'Poll not found'
+    };
     
-    expect(getPoll).toHaveBeenCalledWith(invalidPollId);
+    (votePoll as jest.Mock).mockResolvedValue(mockErrorResponse);
+
+    // Act
+    const result = await votePoll(invalidPollId, optionId, userId);
+    
+    // Assert
+    expect(votePoll).toHaveBeenCalledWith(invalidPollId, optionId, userId);
+    expect(result).toEqual({
+      success: false,
+      error: 'Poll not found',
+      message: 'Poll not found'
+    });
   });
 
   // Integration Test: Test the complete vote recording flow including duplicate vote handling
@@ -95,7 +120,10 @@ describe('Vote Poll Function', () => {
     };
     
     // Mock the getPoll function
-    (getPoll as jest.Mock).mockImplementation(() => Promise.resolve({...mockPoll}));
+    (getPoll as jest.Mock).mockImplementation(() => Promise.resolve({
+      success: true,
+      data: {...mockPoll}
+    }));
     
     // Mock the votePoll function with custom implementation to simulate database interaction
     (votePoll as jest.Mock).mockImplementation(async (pId, oId, uId) => {
@@ -104,15 +132,24 @@ describe('Vote Poll Function', () => {
       if (!oId) throw new Error('Option ID is required');
       
       // For non-anonymous polls, userId is required
-      const poll = await getPoll(pId);
+      const pollResponse = await getPoll(pId);
+      const poll = pollResponse.data;
       if (!poll.isAnonymous && !uId) {
-        throw new Error('User ID is required for non-anonymous polls');
+        return {
+          success: false,
+          error: 'User ID is required for non-anonymous polls',
+          message: 'User ID is required for non-anonymous polls'
+        };
       }
       
       // Check if option exists
       const optionExists = poll.options.some(option => option.id === oId);
       if (!optionExists) {
-        throw new Error('Option not found');
+        return {
+          success: false,
+          error: 'Option not found',
+          message: 'Option not found'
+        };
       }
       
       // Check for duplicate votes if not allowing multiple votes
@@ -122,7 +159,11 @@ describe('Vote Poll Function', () => {
         );
         
         if (hasVoted) {
-          throw new Error('User has already voted on this poll');
+          return {
+            success: false,
+            error: 'User has already voted on this poll',
+            message: 'User has already voted on this poll'
+          };
         }
       }
       
@@ -139,20 +180,33 @@ describe('Vote Poll Function', () => {
       mockPoll.options[optionIndex].votes += 1;
       mockPoll.totalVotes += 1;
       
-      return { success: true };
+      return {
+        success: true,
+        data: true,
+        message: 'Vote recorded successfully'
+      };
     });
 
     // Act - First vote should succeed
     const result1 = await votePoll(pollId, optionId, userId);
     
     // Assert - First vote successful
-    expect(result1).toEqual({ success: true });
+    expect(result1).toEqual({
+      success: true,
+      data: true,
+      message: 'Vote recorded successfully'
+    });
     expect(mockVotes.length).toBe(1);
+3    
+    // Act - Second vote should fail (duplicate vote)
+    const result2 = await votePoll(pollId, optionId, userId);
     
-    // Act & Assert - Second vote should fail (duplicate vote)
-    await expect(votePoll(pollId, optionId, userId))
-      .rejects
-      .toThrow('User has already voted on this poll');
+    // Assert - Second vote should return error
+    expect(result2).toEqual({
+      success: false,
+      error: 'User has already voted on this poll',
+      message: 'User has already voted on this poll'
+    });
     
     // Verify vote count didn't increase
     expect(mockVotes.length).toBe(1);
@@ -160,7 +214,11 @@ describe('Vote Poll Function', () => {
     // Test anonymous voting on a different poll
     mockPoll.isAnonymous = true;
     const anonymousResult = await votePoll(pollId, 'opt2');
-    expect(anonymousResult).toEqual({ success: true });
+    expect(anonymousResult).toEqual({
+      success: true,
+      data: true,
+      message: 'Vote recorded successfully'
+    });
     expect(mockVotes.length).toBe(2);
   });
 });
